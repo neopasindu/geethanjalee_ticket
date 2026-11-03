@@ -22,10 +22,8 @@ var CONFIG = {
   // Number of tickets to generate in this batch
   TICKET_QUANTITY: 2850,
 
-  // Google Spreadsheet ID.
-  // Leave empty ("") when using as a container-bound script (Extensions > Apps Script);
-  // the script will automatically attach to SpreadsheetApp.getActiveSpreadsheet().
-  SPREADSHEET_ID: "",
+  // Google Spreadsheet ID. Set to your Google Sheet ID (required for Web App access).
+  SPREADSHEET_ID: "1Pw7_KsPDCBwDufXr7OoH_FpTO4i7BmDMh_2VS83dZPc",
 
   // Unique event identifier embedded into hashes and QR code captions
   EVENT_CODE: "Geethanjalee360",
@@ -62,8 +60,21 @@ var TOKEN_LENGTH = CONFIG.TOKEN_LENGTH;
  * @returns {GoogleAppsScript.Spreadsheet.Spreadsheet}
  */
 function getSpreadsheet() {
-  const id = (CONFIG.SPREADSHEET_ID || "").trim();
-  if (id && id !== "YOUR_SPREADSHEET_ID") {
+  let id = (CONFIG.SPREADSHEET_ID || "").trim();
+
+  // Check ScriptProperties for saved ID if empty or default placeholder
+  if (!id || id === "YOUR_SPREADSHEET_ID") {
+    try {
+      id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || "";
+    } catch (e) {}
+  }
+
+  // Fallback to project default sheet ID
+  if (!id || id === "YOUR_SPREADSHEET_ID") {
+    id = "1Pw7_KsPDCBwDufXr7OoH_FpTO4i7BmDMh_2VS83dZPc";
+  }
+
+  if (id) {
     try {
       return SpreadsheetApp.openById(id);
     } catch (e) {
@@ -71,13 +82,17 @@ function getSpreadsheet() {
     }
   }
 
-  const active = SpreadsheetApp.getActiveSpreadsheet();
-  if (!active) {
-    throw new Error(
-      "No active spreadsheet found. If running as a standalone script, please set CONFIG.SPREADSHEET_ID."
-    );
-  }
-  return active;
+  try {
+    const active = SpreadsheetApp.getActiveSpreadsheet();
+    if (active) {
+      try {
+        PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', active.getId());
+      } catch (propErr) {}
+      return active;
+    }
+  } catch (e) {}
+
+  throw new Error("No active spreadsheet found. Please verify CONFIG.SPREADSHEET_ID in Code.gs.");
 }
 
 /**
@@ -372,14 +387,17 @@ function generateQRCodes() {
  * @returns {object} { success: boolean, message: string, ticketId?: string, ticketType?: string, securityToken?: string }
  */
 function checkInTicket(scannedCode) {
-  // Use script lock to prevent race conditions during concurrent door scans
-  const lock = LockService.getScriptLock();
-  const hasLock = lock.tryLock(10000);
-  if (!hasLock) {
-    return { success: false, message: "⚠️ Scanner busy with another check-in. Please scan again." };
-  }
+  let lock = null;
+  let hasLock = false;
 
   try {
+    try {
+      lock = LockService.getScriptLock();
+      hasLock = lock.tryLock(10000);
+    } catch (lockError) {
+      Logger.log("⚠️ LockService note: " + lockError.message);
+    }
+
     if (!scannedCode || typeof scannedCode !== 'string') {
       return { success: false, message: "❌ Invalid ticket format: Empty code!" };
     }
@@ -415,7 +433,7 @@ function checkInTicket(scannedCode) {
 
         // 1. Verify token match
         if (storedToken !== scannedToken) {
-          sheet.getRange(i + 1, 6).setValue("INVALID");
+          try { sheet.getRange(i + 1, 6).setValue("INVALID"); } catch (e) {}
           return {
             success: false,
             message: "🚨 SECURITY ALERT: Token mismatch! This ticket may be forged.",
@@ -426,7 +444,7 @@ function checkInTicket(scannedCode) {
         // 2. Cryptographic signature check
         const computedHash = generateValidationHash(ticketId, scannedToken).toUpperCase();
         if (computedHash !== validationHash) {
-          sheet.getRange(i + 1, 6).setValue("INVALID");
+          try { sheet.getRange(i + 1, 6).setValue("INVALID"); } catch (e) {}
           return {
             success: false,
             message: "🚨 SECURITY ALERT: Invalid signature! This ticket is not authentic.",
@@ -436,27 +454,33 @@ function checkInTicket(scannedCode) {
 
         // 3. Double check-in prevention
         if (status === "Checked-In") {
+          const rawTs = data[i][6];
+          const timeStr = (rawTs instanceof Date)
+            ? Utilities.formatDate(rawTs, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss")
+            : String(rawTs || '');
+
           return {
             success: false,
             alreadyCheckedIn: true,
-            message: `⚠️ Ticket already checked in at: ${data[i][6]}`,
+            message: `⚠️ Ticket already checked in at: ${timeStr}`,
             ticketId: ticketId,
-            ticketType: ticketType,
-            timestamp: data[i][6]
+            ticketType: String(ticketType || ''),
+            timestamp: timeStr
           };
         }
 
         // 4. Atomic status & timestamp update in a single range call
         const checkinTime = new Date();
+        const checkinTimeStr = Utilities.formatDate(checkinTime, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
         sheet.getRange(i + 1, 6, 1, 2).setValues([["Checked-In", checkinTime]]);
 
         return {
           success: true,
           message: `✅ Valid ticket! ${ticketId} (Type ${ticketType}) checked in successfully!`,
           ticketId: ticketId,
-          ticketType: ticketType,
+          ticketType: String(ticketType || ''),
           securityToken: scannedToken,
-          timestamp: checkinTime
+          timestamp: checkinTimeStr
         };
       }
     }
@@ -464,9 +488,13 @@ function checkInTicket(scannedCode) {
     return { success: false, message: "❌ Ticket not found in database!" };
 
   } catch (error) {
-    return { success: false, message: "❌ Error during check-in: " + error.toString() };
+    return { success: false, message: "❌ Error during check-in: " + (error.message || error.toString()) };
   } finally {
-    lock.releaseLock();
+    if (lock && hasLock) {
+      try {
+        lock.releaseLock();
+      } catch (e) {}
+    }
   }
 }
 
@@ -526,13 +554,17 @@ function verifyTicket(scannedCode) {
             securityIssue: true
           };
         }
+        const rawTs = data[i][6];
+        const timeStr = (rawTs instanceof Date)
+          ? Utilities.formatDate(rawTs, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss")
+          : (rawTs ? String(rawTs) : '');
 
         return {
           valid: true,
           ticketId: ticketId,
-          ticketType: ticketType,
-          status: status,
-          checkInTime: status === "Checked-In" ? timestamp : null,
+          ticketType: String(ticketType || ''),
+          status: String(status || 'Not Checked-In'),
+          checkInTime: status === "Checked-In" ? timeStr : null,
           securityToken: scannedToken,
           eventCode: CONFIG.EVENT_CODE
         };

@@ -75,6 +75,11 @@
       font-weight: 500;
     }
 
+    .header-actions {
+      display: flex;
+      gap: 6px;
+    }
+
     .stats-card {
       background: var(--surface);
       border-radius: var(--radius);
@@ -136,19 +141,73 @@
       border-bottom: 2px solid var(--primary);
     }
 
-    #reader-container {
+    #camera-section {
       padding: 16px;
       display: flex;
       flex-direction: column;
       align-items: center;
     }
 
+    .camera-placeholder {
+      width: 100%;
+      background: #202124;
+      border-radius: 8px;
+      min-height: 220px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: #fff;
+      padding: 20px;
+      text-align: center;
+      gap: 12px;
+    }
+
     #reader {
       width: 100%;
-      max-width: 480px;
       border-radius: 8px;
       overflow: hidden;
-      background: #000;
+      display: none;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-primary:hover { background: var(--primary-hover); }
+
+    .btn-secondary {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-secondary:hover { background: #f1f3f4; }
+
+    .camera-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 12px;
     }
 
     .mode-switch-bar {
@@ -209,7 +268,13 @@
     input:checked + .slider:before { transform: translateX(20px); }
 
     .manual-input-area {
-      padding: 16px;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .input-row {
       display: flex;
       gap: 8px;
     }
@@ -226,22 +291,6 @@
 
     .manual-input-area input:focus {
       border-color: var(--primary);
-    }
-
-    .manual-input-area button {
-      padding: 12px 18px;
-      background: var(--primary);
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .manual-input-area button:hover {
-      background: var(--primary-hover);
     }
 
     .result-card {
@@ -299,12 +348,6 @@
       background: rgba(0,0,0,0.06);
     }
 
-    .camera-controls {
-      display: flex;
-      gap: 8px;
-      margin-top: 10px;
-    }
-
     .btn-sm {
       padding: 6px 12px;
       font-size: 12px;
@@ -315,6 +358,12 @@
     }
 
     .btn-sm:hover { background: #f1f3f4; }
+
+    .help-text {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -322,9 +371,12 @@
     <header>
       <div class="title-area">
         <h1>🎟️ Secure Ticket Scanner</h1>
-        <span id="event-tag">Google Sheets Connected</span>
+        <span id="event-tag">Connecting...</span>
       </div>
-      <button class="btn-sm" onclick="loadStats()">🔄 Refresh</button>
+      <div class="header-actions">
+        <button class="btn-sm" onclick="testConnection()">🔌 Test</button>
+        <button class="btn-sm" onclick="loadStats()">🔄 Refresh</button>
+      </div>
     </header>
 
     <div class="stats-card">
@@ -354,20 +406,40 @@
 
       <!-- Live Camera Scanner View -->
       <div id="camera-section">
-        <div id="reader-container">
-          <div id="reader"></div>
-          <div class="camera-controls">
-            <button class="btn-sm" id="btn-toggle-camera" onclick="toggleCamera()">Pause Camera</button>
-            <button class="btn-sm" onclick="switchCameraFacing()">Flip Camera</button>
+        <div id="camera-prompt" class="camera-placeholder">
+          <div style="font-size: 32px;">📷</div>
+          <div style="font-weight: 600;">Live QR Camera Scanner</div>
+          <p class="help-text" style="color: #bdc1c6; max-width: 380px;">
+            Click below to start live video scanning. On mobile devices where iframe camera access is restricted, use "Snap Photo with Camera".
+          </p>
+          <div class="camera-actions">
+            <button class="btn-primary" onclick="startCameraScanner()">▶️ Start Camera</button>
+            <button class="btn-secondary" onclick="triggerFileCapture()">📸 Snap Photo</button>
           </div>
         </div>
+
+        <div id="reader"></div>
+
+        <div id="active-camera-controls" class="camera-actions" style="display: none;">
+          <button class="btn-secondary" id="btn-toggle-cam" onclick="pauseOrResumeCamera()">⏸️ Pause</button>
+          <button class="btn-secondary" onclick="switchCameraFacing()">🔄 Flip Camera</button>
+          <button class="btn-secondary" onclick="triggerFileCapture()">📸 Snap Photo</button>
+        </div>
+
+        <!-- Hidden file input for native camera capture fallback -->
+        <input type="file" id="camera-file-input" accept="image/*" capture="environment" style="display: none;" onchange="handleFileCapture(this)">
       </div>
 
       <!-- Manual / Hardware Scanner View -->
       <div id="manual-section" style="display: none;">
         <div class="manual-input-area">
-          <input type="text" id="manual-code" placeholder="Scan or enter code (e.g. TICKET-D-0001-A2B3C4D5)" autocomplete="off">
-          <button onclick="handleManualSubmit()">Submit</button>
+          <p class="help-text">
+            Supports hardware USB/Bluetooth barcode guns or keyboard entry. Press <strong>Enter</strong> to submit.
+          </p>
+          <div class="input-row">
+            <input type="text" id="manual-code" placeholder="Scan or enter ticket code (e.g. TICKET-D-0001-A2B3C4D5)" autocomplete="off">
+            <button class="btn-primary" onclick="handleManualSubmit()">Submit</button>
+          </div>
         </div>
       </div>
 
@@ -399,6 +471,7 @@
     let isProcessing = false;
     let lastScannedText = "";
     let lastScanTime = 0;
+    let activeRequestTimeout = null;
 
     // Web Audio synthesizer for immediate sound feedback
     let audioCtx = null;
@@ -443,19 +516,19 @@
           osc.stop(now + 0.45);
         }
       } catch (e) {
-        console.warn("Audio feedback error:", e);
+        console.warn("Audio feedback note:", e);
       }
     }
 
     function switchInputMode(mode) {
       document.getElementById('tab-camera').classList.toggle('active', mode === 'camera');
       document.getElementById('tab-manual').classList.toggle('active', mode === 'manual');
-      document.getElementById('camera-section').style.display = (mode === 'camera') ? 'block' : 'none';
+      document.getElementById('camera-section').style.display = (mode === 'camera') ? 'flex' : 'none';
       document.getElementById('manual-section').style.display = (mode === 'manual') ? 'block' : 'none';
 
       if (mode === 'manual') {
         const inp = document.getElementById('manual-code');
-        inp.focus();
+        setTimeout(() => inp.focus(), 100);
       }
     }
 
@@ -464,10 +537,18 @@
       document.getElementById('mode-text').textContent = isCheckIn ? '✅ Check-In Mode' : '🔍 Verify Only Mode';
     }
 
-    function startScanner() {
+    // Triggered directly by user click to comply with browser permission policies
+    function startCameraScanner() {
+      const promptEl = document.getElementById('camera-prompt');
+      const readerEl = document.getElementById('reader');
+      const controlsEl = document.getElementById('active-camera-controls');
+
       if (!html5QrCode) {
         html5QrCode = new Html5Qrcode("reader");
       }
+
+      promptEl.style.display = 'none';
+      readerEl.style.display = 'block';
 
       const config = {
         fps: 10,
@@ -479,25 +560,40 @@
         { facingMode: currentFacingMode },
         config,
         onScanSuccess,
-        (errorMessage) => { /* ignore per-frame scan misses */ }
+        (errorMessage) => { /* frame miss */ }
       ).then(() => {
         cameraRunning = true;
-        document.getElementById('btn-toggle-camera').textContent = 'Pause Camera';
+        controlsEl.style.display = 'flex';
+        document.getElementById('btn-toggle-cam').textContent = '⏸️ Pause';
       }).catch(err => {
         console.warn("Camera start failed:", err);
-        document.getElementById('reader').innerHTML = '<div style="color:white;padding:24px;text-align:center;">Camera access not granted or unavailable.<br>Please use Barcode / Manual input.</div>';
+        cameraRunning = false;
+        readerEl.style.display = 'none';
+        promptEl.style.display = 'flex';
+        promptEl.innerHTML = `
+          <div style="font-size: 32px;">⚠️</div>
+          <div style="font-weight: 600; color: #f28b82;">Camera Access Restricted</div>
+          <p class="help-text" style="color: #dadce0; max-width: 380px;">
+            Your browser or Google Apps Script iframe policy blocked direct video streaming.<br>
+            You can <strong>Snap a Photo</strong> with your native camera or use <strong>Barcode / Manual</strong> input.
+          </p>
+          <div class="camera-actions">
+            <button class="btn-primary" onclick="triggerFileCapture()">📸 Snap Photo of QR</button>
+            <button class="btn-secondary" onclick="switchInputMode('manual')">⌨️ Use Manual Input</button>
+          </div>
+        `;
       });
     }
 
-    function toggleCamera() {
+    function pauseOrResumeCamera() {
       if (!html5QrCode) return;
       if (cameraRunning) {
         html5QrCode.stop().then(() => {
           cameraRunning = false;
-          document.getElementById('btn-toggle-camera').textContent = 'Resume Camera';
+          document.getElementById('btn-toggle-cam').textContent = '▶️ Resume';
         });
       } else {
-        startScanner();
+        startCameraScanner();
       }
     }
 
@@ -505,14 +601,39 @@
       currentFacingMode = (currentFacingMode === "environment") ? "user" : "environment";
       if (cameraRunning && html5QrCode) {
         html5QrCode.stop().then(() => {
-          startScanner();
+          startCameraScanner();
         });
       }
     }
 
+    function triggerFileCapture() {
+      document.getElementById('camera-file-input').click();
+    }
+
+    function handleFileCapture(input) {
+      if (!input.files || input.files.length === 0) return;
+      const file = input.files[0];
+
+      if (!html5QrCode) {
+        html5QrCode = new Html5Qrcode("reader");
+      }
+
+      showLoadingResult('⏳ Scanning image file...');
+
+      html5QrCode.scanFile(file, true)
+        .then(decodedText => {
+          processTicket(decodedText);
+        })
+        .catch(err => {
+          onErrorResponse({ message: "Could not detect a QR code in the selected photo. Please try again or use manual input." });
+        })
+        .finally(() => {
+          input.value = '';
+        });
+    }
+
     function onScanSuccess(decodedText) {
       const now = Date.now();
-      // Debounce duplicate scans within 2.5 seconds
       if (decodedText === lastScannedText && (now - lastScanTime) < 2500) {
         return;
       }
@@ -540,9 +661,21 @@
     });
 
     function processTicket(code) {
+      if (isProcessing) return;
       isProcessing = true;
       const isCheckIn = document.getElementById('checkin-toggle').checked;
       showLoadingResult();
+
+      // Clear any prior timeout
+      if (activeRequestTimeout) clearTimeout(activeRequestTimeout);
+
+      // Client safety timeout: abort if server doesn't respond in 15 seconds
+      activeRequestTimeout = setTimeout(() => {
+        if (isProcessing) {
+          isProcessing = false;
+          onErrorResponse(new Error("Request timed out. Please verify SPREADSHEET_ID in Code.gs and check your connection."));
+        }
+      }, 15000);
 
       // Check if running inside Google Apps Script iframe
       if (typeof google !== 'undefined' && google.script && google.script.run) {
@@ -558,7 +691,7 @@
             .verifyTicket(code);
         }
       } else {
-        // Fallback simulation for browser testing
+        // Fallback simulation for offline / standalone browser testing
         setTimeout(() => {
           onCheckInResponse({
             success: true,
@@ -570,20 +703,26 @@
       }
     }
 
-    function showLoadingResult() {
+    function showLoadingResult(msg) {
       const box = document.getElementById('result-box');
       box.className = 'result-card';
       box.style.display = 'block';
       box.style.background = '#e8eaed';
       box.style.color = '#3c4043';
-      document.getElementById('result-title').textContent = '⏳ Verifying ticket...';
+      document.getElementById('result-title').textContent = msg || '⏳ Verifying ticket...';
       document.getElementById('result-details').textContent = 'Validating cryptographic signature with sheet database.';
     }
 
     function onCheckInResponse(res) {
+      if (activeRequestTimeout) clearTimeout(activeRequestTimeout);
       isProcessing = false;
       const box = document.getElementById('result-box');
       box.style.display = 'block';
+
+      if (!res) {
+        onErrorResponse(new Error("Server returned an empty response."));
+        return;
+      }
 
       if (res.success) {
         playSound('success');
@@ -592,6 +731,7 @@
         document.getElementById('result-details').innerHTML = `
           <div><strong>Ticket ID:</strong> ${res.ticketId} <span class="badge">Type ${res.ticketType || '-'}</span></div>
           <div>${res.message}</div>
+          ${res.timestamp ? `<div style="font-size:12px;color:var(--muted);margin-top:4px;">Time: ${res.timestamp}</div>` : ''}
         `;
         loadStats();
       } else if (res.alreadyCheckedIn) {
@@ -615,9 +755,15 @@
     }
 
     function onVerifyResponse(res) {
+      if (activeRequestTimeout) clearTimeout(activeRequestTimeout);
       isProcessing = false;
       const box = document.getElementById('result-box');
       box.style.display = 'block';
+
+      if (!res) {
+        onErrorResponse(new Error("Server returned an empty response."));
+        return;
+      }
 
       if (res.valid) {
         const isChecked = res.status === 'Checked-In';
@@ -646,19 +792,40 @@
     }
 
     function onErrorResponse(err) {
+      if (activeRequestTimeout) clearTimeout(activeRequestTimeout);
       isProcessing = false;
       playSound('error');
       const box = document.getElementById('result-box');
       box.className = 'result-card error';
       box.style.display = 'block';
-      document.getElementById('result-title').textContent = '❌ Server Error';
-      document.getElementById('result-details').textContent = err.message || err.toString();
+      document.getElementById('result-title').textContent = '❌ Verification Error';
+      document.getElementById('result-details').textContent = (err && (err.message || err.toString())) || "An unknown error occurred.";
+    }
+
+    function testConnection() {
+      document.getElementById('event-tag').textContent = 'Testing...';
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(function(stats) {
+            document.getElementById('event-tag').textContent = (stats && stats.eventCode) || 'Connected';
+            alert(`✅ Connected to Google Sheet!\nEvent: ${stats.eventCode}\nTotal tickets in database: ${stats.total}`);
+          })
+          .withFailureHandler(function(err) {
+            document.getElementById('event-tag').textContent = 'Disconnected';
+            alert(`❌ Connection Failed: ${err.message || err.toString()}\n\nPlease verify CONFIG.SPREADSHEET_ID in Code.gs.`);
+          })
+          .getTicketStats();
+      } else {
+        document.getElementById('event-tag').textContent = 'Test Mode (Local)';
+        alert('ℹ️ Running in local preview mode.');
+      }
     }
 
     function loadStats() {
       if (typeof google !== 'undefined' && google.script && google.script.run) {
         google.script.run
           .withSuccessHandler(function(stats) {
+            if (!stats) return;
             document.getElementById('stat-total').textContent = stats.total;
             document.getElementById('stat-checked').textContent = stats.checkedIn;
             document.getElementById('stat-remaining').textContent = stats.notCheckedIn;
@@ -667,13 +834,15 @@
               document.getElementById('event-tag').textContent = stats.eventCode;
             }
           })
+          .withFailureHandler(function(err) {
+            document.getElementById('event-tag').textContent = 'Sheet Error';
+          })
           .getTicketStats();
       }
     }
 
-    // Auto-start on load
+    // On page load, fetch stats without auto-firing camera
     window.addEventListener('load', () => {
-      startScanner();
       loadStats();
     });
   </script>
